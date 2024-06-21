@@ -4,7 +4,6 @@ import { User } from "../models/user.model.js";
 import { uploadOnCloudinary } from "../utils/cloudinary.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import jwt from "jsonwebtoken";
-import { response } from "express";
 
 const generateAccessAndRefreshTokens = async (userId) => {
   try {
@@ -114,7 +113,7 @@ const loginUser = asyncHandler(async (req, res) => {
   send cookies */
 
   const { userName, email, password } = req.body;
-  console.log(email);
+  // console.log(email);
 
   if (!userName && !email) {
     throw new ApiError(404, "username or email is required");
@@ -260,7 +259,7 @@ const changeCurrentPassword = asyncHandler(async (req, res) => {
 const getCurrentUser = asyncHandler(async (req, res) => {
   return res
     .status(200)
-    .json(200, req.user, "Current user fetched Successfully");
+    .json(new ApiResponse(200, req.user, "Current user fetched Successfully"));
 });
 
 const updateAccountDetail = asyncHandler(async (req, res) => {
@@ -342,6 +341,81 @@ const updateUserCoverImage = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, user, "Cover Image updated successfully"));
 });
 
+const getUserChannelProfile = asyncHandler(async (req, res) => {
+  const { userName } = req.params;
+
+  if (!userName?.trim) {
+    throw new ApiError(400, "User name is required");
+  }
+
+  const channel = await User.aggregate([
+    {
+      $match: {
+        userName: userName?.toLowerCase(),
+      },
+    },
+    /* getting subs of specific channel */
+    {
+      $lookup: {
+        from: "subscriptions",
+        localField: "_id",
+        foreignField: "channel",
+        as: "subscribers",
+      },
+    },
+    /* channel subscribed to other channels */
+    {
+      $lookup: {
+        from: "subscriptions",
+        localField: "_id",
+        foreignField: "subscriber",
+        as: "subscribedTo",
+      },
+    },
+    {
+      $addFields: {
+        /* count channel's subs */
+        subscriberCount: {
+          $size: "$subscribers",
+        },
+        /* count channel subs to other channels */
+        channelsSubscribedToCount: {
+          $size: "subscribedTo",
+        },
+        isSubscribed: {
+          $cond: {
+            if: { $in: [req.user?._id, "$subscribers.subscriber"] },
+            then: true,
+            else: false,
+          },
+        },
+      },
+    },
+    {
+      $project: {
+        fullName: 1,
+        userName: 1,
+        subscriberCount: 1,
+        channelsSubscribedToCount: 1,
+        isSubscribed: 1,
+        avatar: 1,
+        email: 1,
+        coverImage: 1,
+      },
+    },
+  ]);
+
+  if (!channel?.length) {
+    throw new ApiError(404, "Channel does not exist");
+  }
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(200, channel[0], "user channel fetched successfully")
+    );
+});
+
 export {
   registerUser,
   loginUser,
@@ -352,4 +426,5 @@ export {
   updateAccountDetail,
   updateUserAvatar,
   updateUserCoverImage,
+  getUserChannelProfile,
 };
